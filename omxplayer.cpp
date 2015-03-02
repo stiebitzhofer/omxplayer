@@ -729,7 +729,7 @@ int main(int argc, char *argv[])
             m_incr = atof(optarg);
           }
           if(m_loop)
-            m_loop_from = m_incr;
+            m_loop_from = 0;// m_incr; Start at the beginning with the looped video
         }
         break;
       case no_osd_opt:
