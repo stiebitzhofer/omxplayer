@@ -44,14 +44,8 @@ OMXPlayerVideo::OMXPlayerVideo()
   m_flush         = false;
   m_flush_requested = false;
   m_cached_size   = 0;
-  m_hdmi_clock_sync = false;
   m_iVideoDelay   = 0;
   m_iCurrentPts   = 0;
-  m_max_data_size = 10 * 1024 * 1024;
-  m_fifo_size     = (float)80*1024*60 / (1024*1024);
-  m_history_valid_pts = 0;
-  m_display = 0;
-  m_layer = 0;
 
   pthread_cond_init(&m_packet_cond, NULL);
   pthread_cond_init(&m_picture_cond, NULL);
@@ -71,30 +65,29 @@ OMXPlayerVideo::~OMXPlayerVideo()
 
 void OMXPlayerVideo::Lock()
 {
-  if(m_use_thread)
+  if(m_config.use_thread)
     pthread_mutex_lock(&m_lock);
 }
 
 void OMXPlayerVideo::UnLock()
 {
-  if(m_use_thread)
+  if(m_config.use_thread)
     pthread_mutex_unlock(&m_lock);
 }
 
 void OMXPlayerVideo::LockDecoder()
 {
-  if(m_use_thread)
+  if(m_config.use_thread)
     pthread_mutex_lock(&m_lock_decoder);
 }
 
 void OMXPlayerVideo::UnLockDecoder()
 {
-  if(m_use_thread)
+  if(m_config.use_thread)
     pthread_mutex_unlock(&m_lock_decoder);
 }
 
-bool OMXPlayerVideo::Open(COMXStreamInfo &hints, OMXClock *av_clock, const CRect& DestRect, EDEINTERLACEMODE deinterlace, OMX_IMAGEFILTERANAGLYPHTYPE anaglyph, bool hdmi_clock_sync, bool use_thread,
-                             float display_aspect, int display, int layer, float queue_size, float fifo_size)
+bool OMXPlayerVideo::Open(OMXClock *av_clock, const OMXVideoConfig &config)
 {
   if (!m_dllAvUtil.Load() || !m_dllAvCodec.Load() || !m_dllAvFormat.Load() || !av_clock)
     return false;
@@ -104,27 +97,15 @@ bool OMXPlayerVideo::Open(COMXStreamInfo &hints, OMXClock *av_clock, const CRect
 
   m_dllAvFormat.av_register_all();
 
-  m_hints       = hints;
+  m_config      = config;
   m_av_clock    = av_clock;
   m_fps         = 25.0f;
   m_frametime   = 0;
-  m_Deinterlace = deinterlace;
-  m_anaglyph    = anaglyph;
-  m_display_aspect = display_aspect;
   m_iCurrentPts = DVD_NOPTS_VALUE;
   m_bAbort      = false;
-  m_use_thread  = use_thread;
   m_flush       = false;
   m_cached_size = 0;
   m_iVideoDelay = 0;
-  m_hdmi_clock_sync = hdmi_clock_sync;
-  m_DestRect    = DestRect;
-  m_display     = display;
-  m_layer       = layer;
-  if (queue_size != 0.0)
-    m_max_data_size = queue_size * 1024 * 1024;
-  if (fifo_size != 0.0)
-    m_fifo_size = fifo_size;
 
   if(!OpenDecoder())
   {
@@ -132,11 +113,35 @@ bool OMXPlayerVideo::Open(COMXStreamInfo &hints, OMXClock *av_clock, const CRect
     return false;
   }
 
-  if(m_use_thread)
+  if(m_config.use_thread)
     Create();
 
   m_open        = true;
 
+  return true;
+}
+
+bool OMXPlayerVideo::Reset()
+{
+  // Quick reset of internal state back to a default that is ready to play from
+  // the start or a new position.  This replaces a combination of Close and then
+  // Open calls but does away with the DLL unloading/loading, decoder reset, and
+  // thread reset.
+  Flush();   
+  m_stream_id         = -1;
+  m_pStream           = NULL;
+  m_iCurrentPts       = DVD_NOPTS_VALUE;
+  m_frametime         = 0;
+  m_bAbort            = false;
+  m_flush             = false;
+  m_flush_requested   = false;
+  m_cached_size       = 0;
+  m_iVideoDelay       = 0;
+
+  // Keep consistency with old Close/Open logic by continuing to return a bool
+  // with the success/failure of this call.  Although little can go wrong
+  // setting some variables, in the future this could indicate success/failure
+  // of the reset.  For now just return success (true).
   return true;
 }
 
@@ -169,12 +174,14 @@ bool OMXPlayerVideo::Close()
   return true;
 }
 
-static unsigned count_bits(int32_t value)
+void OMXPlayerVideo::SetAlpha(int alpha)
 {
-  unsigned bits = 0;
-  for(;value;++bits)
-    value &= value - 1;
-  return bits;
+  m_decoder->SetAlpha(alpha);
+}
+
+void OMXPlayerVideo::SetVideoRect(const CRect& SrcRect, const CRect& DestRect)
+{
+  m_decoder->SetVideoRect(SrcRect, DestRect);
 }
 
 bool OMXPlayerVideo::Decode(OMXPacket *pkt)
@@ -182,13 +189,11 @@ bool OMXPlayerVideo::Decode(OMXPacket *pkt)
   if(!pkt)
     return false;
 
-  // some packed bitstream AVI files set almost all pts values to DVD_NOPTS_VALUE, but have a scattering of real pts values.
-  // the valid pts values match the dts values.
-  // if a stream has had more than 4 valid pts values in the last 16, the use UNKNOWN, otherwise use dts
-  m_history_valid_pts = (m_history_valid_pts << 1) | (pkt->pts != DVD_NOPTS_VALUE);
+  double dts = pkt->dts;
   double pts = pkt->pts;
-  if(pkt->pts == DVD_NOPTS_VALUE && (m_iCurrentPts == DVD_NOPTS_VALUE || count_bits(m_history_valid_pts & 0xffff) < 4))
-    pts = pkt->dts;
+
+  if (dts != DVD_NOPTS_VALUE)
+    dts += m_iVideoDelay;
 
   if (pts != DVD_NOPTS_VALUE)
     pts += m_iVideoDelay;
@@ -203,7 +208,7 @@ bool OMXPlayerVideo::Decode(OMXPacket *pkt)
   }
 
   CLog::Log(LOGINFO, "CDVDPlayerVideo::Decode dts:%.0f pts:%.0f cur:%.0f, size:%d", pkt->dts, pkt->pts, m_iCurrentPts, pkt->size);
-  m_decoder->Decode(pkt->data, pkt->size, pts);
+  m_decoder->Decode(pkt->data, pkt->size, dts, pts);
   return true;
 }
 
@@ -286,7 +291,7 @@ bool OMXPlayerVideo::AddPacket(OMXPacket *pkt)
   if(m_bStop || m_bAbort)
     return ret;
 
-  if((m_cached_size + pkt->size) < m_max_data_size)
+  if((m_cached_size + pkt->size) < m_config.queue_size * 1024 * 1024)
   {
     Lock();
     m_cached_size += pkt->size;
@@ -299,10 +304,11 @@ bool OMXPlayerVideo::AddPacket(OMXPacket *pkt)
   return ret;
 }
 
+
 bool OMXPlayerVideo::OpenDecoder()
 {
-  if (m_hints.fpsrate && m_hints.fpsscale)
-    m_fps = DVD_TIME_BASE / OMXReader::NormalizeFrameduration((double)DVD_TIME_BASE * m_hints.fpsscale / m_hints.fpsrate);
+  if (m_config.hints.fpsrate && m_config.hints.fpsscale)
+    m_fps = DVD_TIME_BASE / OMXReader::NormalizeFrameduration((double)DVD_TIME_BASE * m_config.hints.fpsscale / m_config.hints.fpsrate);
   else
     m_fps = 25;
 
@@ -315,7 +321,7 @@ bool OMXPlayerVideo::OpenDecoder()
   m_frametime = (double)DVD_TIME_BASE / m_fps;
 
   m_decoder = new COMXVideo();
-  if(!m_decoder->Open(m_hints, m_av_clock, m_DestRect, m_display_aspect, m_Deinterlace, m_anaglyph, m_hdmi_clock_sync, m_display, m_layer, m_fifo_size))
+  if(!m_decoder->Open(m_av_clock, m_config))
   {
     CloseDecoder();
     return false;
@@ -323,11 +329,8 @@ bool OMXPlayerVideo::OpenDecoder()
   else
   {
     printf("Video codec %s width %d height %d profile %d fps %f\n",
-        m_decoder->GetDecoderName().c_str() , m_hints.width, m_hints.height, m_hints.profile, m_fps);
+        m_decoder->GetDecoderName().c_str() , m_config.hints.width, m_config.hints.height, m_config.hints.profile, m_fps);
   }
-
-  // start from assuming all recent frames had valid pts
-  m_history_valid_pts = ~0;
 
   return true;
 }
