@@ -181,8 +181,8 @@ bool OMXPlayerAudio::Decode(OMXPacket *pkt)
   unsigned int old_bitrate = m_config.hints.bitrate;
   unsigned int new_bitrate = pkt->hints.bitrate;
 
-  /* only check bitrate changes on CODEC_ID_DTS, CODEC_ID_AC3, CODEC_ID_EAC3 */
-  if(m_config.hints.codec != CODEC_ID_DTS && m_config.hints.codec != CODEC_ID_AC3 && m_config.hints.codec != CODEC_ID_EAC3)
+  /* only check bitrate changes on AV_CODEC_ID_DTS, AV_CODEC_ID_AC3, AV_CODEC_ID_EAC3 */
+  if(m_config.hints.codec != AV_CODEC_ID_DTS && m_config.hints.codec != AV_CODEC_ID_AC3 && m_config.hints.codec != AV_CODEC_ID_EAC3)
   {
     new_bitrate = old_bitrate = 0;
   }
@@ -278,17 +278,18 @@ void OMXPlayerAudio::Process()
 {
   OMXPacket *omx_pkt = NULL;
 
-  while(!m_bStop && !m_bAbort)
+  while(true)
   {
     Lock();
-    if(m_packets.empty())
+    if(!(m_bStop || m_bAbort) && m_packets.empty())
       pthread_cond_wait(&m_packet_cond, &m_lock);
-    UnLock();
 
-    if(m_bAbort)
+    if (m_bStop || m_bAbort)
+    {
+      UnLock();
       break;
+    }
 
-    Lock();
     if(m_flush && omx_pkt)
     {
       OMXReader::FreePacket(omx_pkt);
@@ -395,15 +396,15 @@ bool OMXPlayerAudio::IsPassthrough(COMXStreamInfo hints)
 
   bool passthrough = false;
 
-  if(hints.codec == CODEC_ID_AC3)
+  if(hints.codec == AV_CODEC_ID_AC3)
   {
     passthrough = true;
   }
-  if(hints.codec == CODEC_ID_EAC3)
+  if(hints.codec == AV_CODEC_ID_EAC3)
   {
     passthrough = true;
   }
-  if(hints.codec == CODEC_ID_DTS)
+  if(hints.codec == AV_CODEC_ID_DTS)
   {
     passthrough = true;
   }
