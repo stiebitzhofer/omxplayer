@@ -112,6 +112,11 @@ bool COMXAudio::PortSettingsChanged()
     if(!m_omx_render_hdmi.Initialize("OMX.broadcom.audio_render", OMX_IndexParamAudioInit))
       return false;
   }
+  if (m_config.device == "omx:alsa")
+  {
+    if(!m_omx_render_analog.Initialize("OMX.alsa.audio_render", OMX_IndexParamAudioInit))
+      return false;
+  }
 
   UpdateAttenuation();
 
@@ -235,7 +240,7 @@ bool COMXAudio::PortSettingsChanged()
 
     OMX_CONFIG_BRCMAUDIODESTINATIONTYPE audioDest;
     OMX_INIT_STRUCTURE(audioDest);
-    strncpy((char *)audioDest.sName, "local", strlen("local"));
+    strncpy((char *)audioDest.sName, m_config.device == "omx:alsa" ? m_config.subdevice.c_str() : "local", sizeof(audioDest.sName));
     omx_err = m_omx_render_analog.SetConfig(OMX_IndexConfigBrcmAudioDestination, &audioDest);
     if (omx_err != OMX_ErrorNone)
     {
@@ -737,6 +742,11 @@ void COMXAudio::Flush()
   
   while(!m_ampqueue.empty())
     m_ampqueue.pop_front();
+
+  if( m_omx_render_analog.IsInitialized() )
+    m_omx_render_analog.ResetEos();
+  if( m_omx_render_hdmi.IsInitialized() )
+    m_omx_render_hdmi.ResetEos();
 
   m_last_pts      = DVD_NOPTS_VALUE;
   m_submitted     = 0.0f;
