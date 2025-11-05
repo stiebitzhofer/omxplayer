@@ -26,6 +26,7 @@
 #include <sys/ioctl.h>
 #include <getopt.h>
 #include <string.h>
+#include <time.h>
 
 #define AV_NOWARN_DEPRECATED
 
@@ -566,6 +567,7 @@ int main(int argc, char *argv[])
   const int advanced_opt    = 0x211;
   const int aspect_mode_opt = 0x212;
   const int crop_opt        = 0x213;
+  const int clock_sync_opt  = 0x214;
   const int http_cookie_opt = 0x300;
   const int http_user_agent_opt = 0x301;
   const int lavfdopts_opt   = 0x400;
@@ -625,6 +627,7 @@ int main(int argc, char *argv[])
     { "layout",       required_argument,  NULL,          layout_opt },
     { "dbus_name",    required_argument,  NULL,          dbus_name_opt },
     { "loop",         no_argument,        NULL,          loop_opt },
+    { "clock-sync",   no_argument,        NULL,          clock_sync_opt },
     { "layer",        required_argument,  NULL,          layer_opt },
     { "alpha",        required_argument,  NULL,          alpha_opt },
     { "display",      required_argument,  NULL,          display_opt },
@@ -878,6 +881,23 @@ int main(int argc, char *argv[])
         if(m_incr != 0)
             m_loop_from = m_incr;
         m_loop = true;
+        break;
+      case clock_sync_opt:
+        {
+          // Get current system time
+          time_t now = time(NULL);
+          struct tm *local = localtime(&now);
+
+          // Calculate position in seconds from current time (24-hour format)
+          int hours = local->tm_hour;
+          int minutes = local->tm_min;
+          int seconds = local->tm_sec;
+
+          // Set start position to current time of day in seconds
+          m_incr = hours * 3600 + minutes * 60 + seconds;
+
+          printf("Clock sync: Starting video at %02d:%02d:%02d\n", hours, minutes, seconds);
+        }
         break;
       case 'b':
         m_blank_background = optarg ? strtoul(optarg, NULL, 0) : 0xff000000;

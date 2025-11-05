@@ -103,6 +103,7 @@ Usage: omxplayer [OPTIONS] [FILE]
     -l  --pos n                 Start position (hh:mm:ss)
     -b  --blank[=0xAARRGGBB]    Set the video background color to black (or optional ARGB value)
         --loop                  Loop file. Ignored if file not seekable
+        --clock-sync            Start video at current time (for 24-hour videos)
         --no-boost-on-downmix   Don't boost volume when downmixing
         --vol n                 set initial volume in millibels (default 0)
         --amp n                 set initial amplification in millibels (default 0)
