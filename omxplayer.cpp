@@ -1765,6 +1765,24 @@ int main(int argc, char *argv[])
     if(m_omx_pkt)
       m_send_eos = false;
 
+    // Seamless loop: Check if we're near the end and trigger loop early
+    if (m_loop && !m_omx_reader.IsEof() && !m_incr)
+    {
+      int64_t current_time = m_av_clock->OMXMediaTime();
+      int64_t stream_length = m_omx_reader.GetStreamLength();
+      // Loop when within 0.8 seconds of the end (in microseconds)
+      // This provides smooth transition without visible interruption
+      int64_t loop_threshold = 800000;
+
+      if (stream_length > 0 && current_time > 0 &&
+          (stream_length - current_time) < loop_threshold &&
+          (stream_length - current_time) > 0)
+      {
+        // Trigger seamless loop by seeking back to start
+        m_incr = m_loop_from - (current_time / DVD_TIME_BASE);
+      }
+    }
+
     if(m_omx_reader.IsEof() && !m_omx_pkt)
     {
       if (!m_send_eos && m_has_video)
