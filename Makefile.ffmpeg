@@ -246,7 +246,7 @@ clean:
 
 .PHONY : checkout
 checkout:
-	git clone git://source.ffmpeg.org/ffmpeg ffmpeg -b release/8.0 --depth=1
+	git clone git://source.ffmpeg.org/ffmpeg ffmpeg -b release/8.1 --depth=1
 
 .PHONY : install
 install:
